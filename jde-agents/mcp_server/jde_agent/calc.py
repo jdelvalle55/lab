@@ -23,6 +23,7 @@ class Recommendation:
     safety_stock: float | None
     reorder_point: float | None
     reorder_qty: float | None
+    lead_time_assumed: bool = False
     note: str = ""
 
     def as_dict(self) -> dict:
@@ -49,7 +50,12 @@ def apply_order_rules(qty: float, min_qty: float = 0, max_qty: float = 0,
 
 def recommend(weekly_usage: list[float], lead_time_days: float, *, weeks: int,
               z: float, review_period_days: int, min_qty: float = 0, max_qty: float = 0,
-              multiple: float = 0) -> Recommendation:
+              multiple: float = 0, default_lead_time_days: float = 0) -> Recommendation:
+    """default_lead_time_days > 0 is used when the item branch has no lead time; the result is
+    then flagged lead_time_assumed so nobody mistakes it for a sized value."""
+    assumed = False
+    if (not lead_time_days or lead_time_days <= 0) and default_lead_time_days > 0:
+        lead_time_days, assumed = float(default_lead_time_days), True
     series = weekly_series(weekly_usage, weeks)
     avg_daily = sum(series) / (weeks * 7)
     wk_sd = statistics.pstdev(series) if weeks > 1 else 0.0
@@ -57,14 +63,16 @@ def recommend(weekly_usage: list[float], lead_time_days: float, *, weeks: int,
         return Recommendation(avg_daily, wk_sd, 0.0, None, None, None,
                               "No lead time on the item branch (IBLTLV = 0); cannot size SS/ROP.")
     if avg_daily == 0:
-        return Recommendation(0.0, 0.0, lead_time_days, 0.0, 0.0, 0.0,
+        return Recommendation(0.0, 0.0, lead_time_days, 0.0, 0.0, 0.0, assumed,
                               f"No usage in the last {weeks} weeks.")
     sigma_daily = wk_sd / math.sqrt(7)
     ss = z * sigma_daily * math.sqrt(lead_time_days)
     rop = avg_daily * lead_time_days + ss
     roq = apply_order_rules(math.ceil(avg_daily * review_period_days), min_qty, max_qty, multiple)
+    note = (f"ASSUMED lead time of {lead_time_days:g} days (item branch has none); "
+            "set IBLTLV before using these values.") if assumed else ""
     return Recommendation(avg_daily, wk_sd, float(lead_time_days),
-                          math.ceil(ss), math.ceil(rop), math.ceil(roq))
+                          math.ceil(ss), math.ceil(rop), math.ceil(roq), assumed, note)
 
 
 # Gap codes returned by find_param_gaps, most severe first.

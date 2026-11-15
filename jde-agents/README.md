@@ -21,7 +21,7 @@ The first slice of step 2 from the architecture doc: a read-only schema pair ove
 | `recommend_reorder(item, branch)` | same | Suggested SS/ROP/ROQ with formula inputs and inventory position |
 | `list_mrp_exceptions(branch, message_type?, min_days_late?, limit?)` | V_MRP_EXCEPTIONS | Open F3411 messages by type, ranked by days late |
 
-Math lives in `mcp_server/jde_agent/calc.py`: 13 weeks of usage (missing weeks = 0), SS = z × σ_daily × √LT, ROP = daily usage × LT + SS, ROQ = daily usage × 30. The LLM never computes these.
+Math lives in `mcp_server/jde_agent/calc.py`: 13 weeks of usage (missing weeks = 0), SS = z × σ_daily × √LT, ROP = daily usage × LT + SS, ROQ = daily usage × 30. The LLM never computes these. When an item branch has no lead time (IBLTLV = 0), `DEFAULT_LEAD_TIME_DAYS` (default 14) is used and the result is flagged `lead_time_assumed` with an ASSUMED note; set it to 0 to turn that off.
 
 ## Deploy (lab, JDV920)
 

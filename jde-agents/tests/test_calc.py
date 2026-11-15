@@ -57,3 +57,15 @@ def test_order_rules_min_multiple_max():
 def test_recommend_applies_order_rules():
     rec = calc.recommend([70.0] * 13, 14, min_qty=500, max_qty=5000, multiple=100, **KW)
     assert rec.reorder_qty == 500          # 10/day * 30 = 300, raised to the 500 minimum
+
+
+def test_default_lead_time_is_flagged():
+    rec = calc.recommend([70.0] * 13, 0, default_lead_time_days=14, **KW)
+    assert rec.lead_time_assumed and rec.reorder_point == 140 and "ASSUMED" in rec.note
+    assert "NO_LEAD_TIME" in calc.find_gaps({"safety_stock": 0, "reorder_point": 0,
+                                             "lead_time_days": 0}, rec)
+
+
+def test_real_lead_time_not_flagged():
+    rec = calc.recommend([70.0] * 13, 7, default_lead_time_days=14, **KW)
+    assert not rec.lead_time_assumed and rec.lead_time_days == 7

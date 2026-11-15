@@ -35,7 +35,8 @@ def _jsonable(rows: list[dict]) -> list[dict]:
 
 
 def _order_rules(it: dict) -> dict:
-    return {"min_qty": float(it.get("min_reorder_qty") or 0),
+    return {"default_lead_time_days": S.default_lead_time_days,
+            "min_qty": float(it.get("min_reorder_qty") or 0),
             "max_qty": float(it.get("max_reorder_qty") or 0),
             "multiple": float(it.get("order_multiple") or 0)}
 
@@ -85,6 +86,7 @@ def find_param_gaps(branch: str, planner_an8: int | None = None, limit: int = 25
                              "suggested": rec.as_dict(),
                              "gaps": [{"code": g, "text": calc.GAP_TEXT[g]} for g in gaps]})
     findings.sort(key=lambda f: f["suggested"]["avg_daily_usage"], reverse=True)
+    # Suggested values on NO_LEAD_TIME items use the assumed default (see lead_time_assumed).
     counts: dict[str, int] = defaultdict(int)
     for f in findings:
         for g in f["gaps"]:
@@ -124,6 +126,7 @@ def recommend_reorder(item: str, branch: str) -> dict:
         "below_suggested_rop": bool(rec.reorder_point is not None and position < rec.reorder_point),
         "gaps": [{"code": g, "text": calc.GAP_TEXT[g]} for g in calc.find_gaps(it, rec)],
         "method": {"weeks": S.usage_weeks, "z": S.service_level_z,
+                   "default_lead_time_days": S.default_lead_time_days,
                    "review_period_days": S.review_period_days, "weekly_usage": weekly},
     }
 

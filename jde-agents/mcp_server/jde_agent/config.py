@@ -19,6 +19,7 @@ class Settings:
     port: int = field(default_factory=lambda: int(_env("MCP_PORT", "8082")))
     service_level_z: float = field(default_factory=lambda: float(_env("SERVICE_LEVEL_Z", "1.65")))
     review_period_days: int = field(default_factory=lambda: int(_env("REVIEW_PERIOD_DAYS", "30")))
+    default_lead_time_days: float = field(default_factory=lambda: float(_env("DEFAULT_LEAD_TIME_DAYS", "14")))
     usage_weeks: int = field(default_factory=lambda: int(_env("USAGE_WEEKS", "13")))
     planned_stocking_types: tuple[str, ...] = field(
         default_factory=lambda: tuple(s.strip() for s in _env("PLANNED_STOCKING_TYPES", "P,M").split(","))
