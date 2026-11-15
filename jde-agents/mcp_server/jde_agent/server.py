@@ -52,6 +52,30 @@ def _usage_by_item(branch: str, itm: int | None = None) -> dict[int, list[float]
     return usage
 
 
+def _actual_lead_times(branch: str, itm: int | None = None) -> dict[int, dict]:
+    sql = ("SELECT itm, receipts, suppliers, weighted_median_lt_days, worst_p90_lt_days, "
+           "last_receipt_date FROM JDEAGENT_OWN.V_ITEM_LEADTIME WHERE mcu = :mcu"
+           + (" AND itm = :itm" if itm is not None else ""))
+    params = {"mcu": branch.strip()} | ({"itm": itm} if itm is not None else {})
+    return {r["itm"]: r for r in db.query(S, S.jde_user, sql, params, max_rows=50_000)}
+
+
+def _size(it: dict, weekly: list[float], actual: dict | None):
+    """Resolve the lead time (actual > item branch > assumed default) and size the item."""
+    planned = float(it["lead_time_days"] or 0)
+    act_days = float(actual["weighted_median_lt_days"]) if actual and actual["weighted_median_lt_days"] is not None else None
+    receipts = int(actual["receipts"]) if actual else 0
+    lt, source = calc.choose_lead_time(planned, act_days, receipts, S.min_lt_receipts)
+    rec = calc.recommend(weekly, lt, weeks=S.usage_weeks, z=S.service_level_z,
+                         review_period_days=S.review_period_days, **_order_rules(it))
+    if source == "none":
+        source = "assumed" if rec.lead_time_assumed else "none"
+    drift = calc.lead_time_drift(planned, act_days, receipts, S.min_lt_receipts, S.lt_drift_pct)
+    lt_info = {"source": source, "used_days": rec.lead_time_days, "planned_days": planned,
+               "actual_median_days": act_days, "receipts": receipts}
+    return rec, lt_info, drift
+
+
 @mcp.tool()
 def find_param_gaps(branch: str, planner_an8: int | None = None, limit: int = 25) -> dict:
     """Find stocked items in a branch/plant whose safety stock, reorder point or lead time
@@ -72,18 +96,17 @@ def find_param_gaps(branch: str, planner_an8: int | None = None, limit: int = 25
     items = [i for i in db.query(S, S.jde_user, sql, params, max_rows=50_000)
              if (i["stocking_type"] or "").strip() in S.planned_stocking_types]
     usage = _usage_by_item(branch)
+    actuals = _actual_lead_times(branch)
     findings = []
     for it in items:
-        rec = calc.recommend(usage.get(it["itm"], []), float(it["lead_time_days"] or 0),
-                             weeks=S.usage_weeks, z=S.service_level_z,
-                             review_period_days=S.review_period_days, **_order_rules(it))
-        gaps = calc.find_gaps(it, rec)
+        rec, lt_info, drift = _size(it, usage.get(it["itm"], []), actuals.get(it["itm"]))
+        gaps = calc.find_gaps(it, rec, drift)
         if gaps:
             findings.append({"item": it["litm"], "description": it["description"],
                              "planner_an8": it["planner_an8"],
                              "current": {k: it[k] for k in ("safety_stock", "reorder_point",
                                                             "reorder_qty", "lead_time_days")},
-                             "suggested": rec.as_dict(),
+                             "suggested": rec.as_dict(), "lead_time": lt_info,
                              "gaps": [{"code": g, "text": calc.GAP_TEXT[g]} for g in gaps]})
     findings.sort(key=lambda f: f["suggested"]["avg_daily_usage"], reverse=True)
     # Suggested values on NO_LEAD_TIME items use the assumed default (see lead_time_assumed).
@@ -98,7 +121,8 @@ def find_param_gaps(branch: str, planner_an8: int | None = None, limit: int = 25
 @mcp.tool()
 def recommend_reorder(item: str, branch: str) -> dict:
     """Suggest safety stock, reorder point and reorder quantity for one item/branch from
-    13 weeks of usage and the item-branch lead time. Shows the inputs so a planner can check
+    13 weeks of usage and a lead time taken from actual PO receipts (when there are enough),
+    else the item-branch lead time, else an assumed default (lead_time.source says which). Shows the inputs so a planner can check
     the math. Read-only: it does not update F4102.
 
     item: 2nd item number (LITM). branch: branch/plant (MCU).
@@ -110,9 +134,7 @@ def recommend_reorder(item: str, branch: str) -> dict:
         return {"error": "Item/branch not found or not in your scope."}
     it = rows[0]
     weekly = _usage_by_item(branch, it["itm"]).get(it["itm"], [])
-    rec = calc.recommend(weekly, float(it["lead_time_days"] or 0), weeks=S.usage_weeks,
-                         z=S.service_level_z, review_period_days=S.review_period_days,
-                         **_order_rules(it))
+    rec, lt_info, drift = _size(it, weekly, _actual_lead_times(branch, it["itm"]).get(it["itm"]))
     available = float(it["on_hand"] or 0) - float(it["committed_qty"] or 0)
     position = available + float(it["on_po"] or 0)
     return {
@@ -122,13 +144,49 @@ def recommend_reorder(item: str, branch: str) -> dict:
                                                   "order_multiple", "lead_time_days", "on_hand",
                                                   "committed_qty", "on_po")}])[0],
         "suggested": rec.as_dict(),
+        "lead_time": lt_info,
         "inventory_position": round(position, 2),
         "below_suggested_rop": bool(rec.reorder_point is not None and position < rec.reorder_point),
-        "gaps": [{"code": g, "text": calc.GAP_TEXT[g]} for g in calc.find_gaps(it, rec)],
+        "gaps": [{"code": g, "text": calc.GAP_TEXT[g]} for g in calc.find_gaps(it, rec, drift)],
         "method": {"weeks": S.usage_weeks, "z": S.service_level_z,
                    "default_lead_time_days": S.default_lead_time_days,
                    "review_period_days": S.review_period_days, "weekly_usage": weekly},
     }
+
+
+@mcp.tool()
+def supplier_leadtime_drift(branch: str, min_receipts: int | None = None,
+                            drift_pct: float | None = None, limit: int = 25) -> dict:
+    """Compare actual supplier lead times (PO order date to receipt date, F4311/F43121) with the
+    planned item-branch lead time (IBLTLV). Returns item/supplier pairs whose median differs by
+    at least drift_pct, worst first, plus items with receipts but no planned lead time.
+    Read-only: it does not change lead times in JDE.
+    """
+    limit = max(1, min(limit, 100))
+    min_r = min_receipts if min_receipts is not None else S.min_lt_receipts
+    pct = drift_pct if drift_pct is not None else S.lt_drift_pct
+    rows = _jsonable(db.query(
+        S, S.jde_user,
+        "SELECT litm, supplier_an8, receipts, median_lt_days, p90_lt_days, min_lt_days, "
+        "max_lt_days, planned_lt_days, last_receipt_date FROM JDEAGENT_OWN.V_SUPPLIER_LEADTIME "
+        "WHERE mcu = :mcu AND receipts >= :r", {"mcu": branch.strip(), "r": min_r},
+        max_rows=50_000))
+    drifting, unplanned = [], []
+    for r in rows:
+        planned, med = float(r["planned_lt_days"] or 0), float(r["median_lt_days"] or 0)
+        if planned <= 0:
+            unplanned.append(r)
+            continue
+        delta = med - planned
+        if abs(delta) / planned * 100 >= pct:
+            drifting.append(r | {"delta_days": round(delta, 1),
+                                 "delta_pct": round(delta / planned * 100, 1)})
+    drifting.sort(key=lambda r: abs(r["delta_pct"]), reverse=True)
+    unplanned.sort(key=lambda r: r["receipts"], reverse=True)
+    return {"branch": branch, "pairs_checked": len(rows), "min_receipts": min_r,
+            "drift_pct": pct, "drifting_count": len(drifting),
+            "no_planned_lead_time_count": len(unplanned),
+            "drifting": drifting[:limit], "no_planned_lead_time": unplanned[:limit]}
 
 
 @mcp.tool()

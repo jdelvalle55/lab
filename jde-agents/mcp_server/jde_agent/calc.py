@@ -83,11 +83,31 @@ GAP_TEXT = {
     "NO_SAFETY_STOCK_WITH_USAGE": "Safety stock is zero but the item has usage",
     "ROP_EXCESSIVE": "Reorder point is more than 3x the suggested value",
     "PARAMS_WITHOUT_USAGE": "Has ROP/safety stock but no usage in the window",
+    "LEAD_TIME_DRIFT": "Actual supplier lead time differs from the planned lead time",
 }
 
 
-def find_gaps(current: dict, rec: Recommendation) -> list[str]:
-    """current: safety_stock, reorder_point, lead_time_days from V_ITEM_PLANNING."""
+def choose_lead_time(planned_days: float, actual_days: float | None, receipts: int,
+                     min_receipts: int) -> tuple[float, str]:
+    """Pick the lead time used for sizing: actual receipts history first (when there is enough
+    of it), then the item-branch lead time, else none (the caller may apply an assumed default)."""
+    if actual_days is not None and receipts >= min_receipts and actual_days > 0:
+        return float(actual_days), "actual"
+    if planned_days and planned_days > 0:
+        return float(planned_days), "item_branch"
+    return 0.0, "none"
+
+
+def lead_time_drift(planned_days: float, actual_days: float | None, receipts: int,
+                    min_receipts: int, drift_pct: float) -> bool:
+    if actual_days is None or receipts < min_receipts or not planned_days or planned_days <= 0:
+        return False
+    return abs(actual_days - planned_days) / planned_days * 100 >= drift_pct
+
+
+def find_gaps(current: dict, rec: Recommendation, drift: bool = False) -> list[str]:
+    """current: safety_stock, reorder_point, lead_time_days from V_ITEM_PLANNING.
+    drift: result of lead_time_drift() for this item branch."""
     gaps: list[str] = []
     ss, rop = float(current.get("safety_stock") or 0), float(current.get("reorder_point") or 0)
     has_usage = rec.avg_daily_usage > 0
@@ -103,4 +123,6 @@ def find_gaps(current: dict, rec: Recommendation) -> list[str]:
         gaps.append("ROP_EXCESSIVE")
     if not has_usage and (rop > 0 or ss > 0):
         gaps.append("PARAMS_WITHOUT_USAGE")
+    if drift:
+        gaps.append("LEAD_TIME_DRIFT")
     return gaps

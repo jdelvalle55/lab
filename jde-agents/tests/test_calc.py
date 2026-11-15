@@ -69,3 +69,16 @@ def test_default_lead_time_is_flagged():
 def test_real_lead_time_not_flagged():
     rec = calc.recommend([70.0] * 13, 7, default_lead_time_days=14, **KW)
     assert not rec.lead_time_assumed and rec.lead_time_days == 7
+
+
+def test_choose_lead_time_precedence():
+    assert calc.choose_lead_time(10, 21.0, 5, 3) == (21.0, "actual")
+    assert calc.choose_lead_time(10, 21.0, 2, 3) == (10.0, "item_branch")
+    assert calc.choose_lead_time(0, None, 0, 3) == (0.0, "none")
+
+
+def test_lead_time_drift():
+    assert calc.lead_time_drift(10, 14.0, 5, 3, 25)
+    assert not calc.lead_time_drift(10, 12.0, 5, 3, 25)
+    assert not calc.lead_time_drift(0, 14.0, 5, 3, 25)
+    assert not calc.lead_time_drift(10, 30.0, 1, 3, 25)
