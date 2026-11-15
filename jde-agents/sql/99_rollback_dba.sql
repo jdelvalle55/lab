@@ -4,5 +4,6 @@
 -- =====================================================================
 SET ECHO ON
 DROP USER JDEAGENT_RO  CASCADE;
-DROP USER JDEAGENT_OWN CASCADE;   -- drops views, functions, config/scope/audit tables
+-- drops views, functions, config/scope/audit tables
+DROP USER JDEAGENT_OWN CASCADE;
 DROP PROFILE JDEAGENT_PROFILE;

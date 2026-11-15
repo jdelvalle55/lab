@@ -13,7 +13,8 @@ SET ECHO ON
 WHENEVER SQLERROR EXIT FAILURE ROLLBACK
 
 DEFINE ro_password = '&1'
-DEFINE ts = 'USERS'          -- tablespace for the small config/scope/audit tables
+-- tablespace for the small config/scope/audit tables
+DEFINE ts = 'USERS'
 
 -- Profile: cap sessions and idle time for the agent's read-only login.
 CREATE PROFILE JDEAGENT_PROFILE LIMIT
@@ -21,7 +22,8 @@ CREATE PROFILE JDEAGENT_PROFILE LIMIT
   IDLE_TIME                30
   FAILED_LOGIN_ATTEMPTS    5
   PASSWORD_LOCK_TIME       1/24
-  PASSWORD_LIFE_TIME       UNLIMITED;   -- service account; rotate via vault/runbook
+  -- service account; rotate via vault/runbook
+  PASSWORD_LIFE_TIME       UNLIMITED;
 
 -- Owner: schema-only account (no password, cannot log in). Requires 18c+.
 -- On 12c replace NO AUTHENTICATION with IDENTIFIED BY <random> ACCOUNT LOCK.
@@ -37,11 +39,16 @@ GRANT CREATE SESSION TO JDEAGENT_RO;
 
 -- Owner needs SELECT ... WITH GRANT OPTION so RO can read views built on TESTDTA.
 -- Only the tables the views use. Add F41021/F4108/F4111 etc. as phases need them.
-GRANT SELECT ON TESTDTA.F4101  TO JDEAGENT_OWN WITH GRANT OPTION;  -- item master
-GRANT SELECT ON TESTDTA.F4102  TO JDEAGENT_OWN WITH GRANT OPTION;  -- item branch
-GRANT SELECT ON TESTDTA.F41021 TO JDEAGENT_OWN WITH GRANT OPTION;  -- item location (on hand)
-GRANT SELECT ON TESTDTA.F4111  TO JDEAGENT_OWN WITH GRANT OPTION;  -- item ledger (usage)
-GRANT SELECT ON TESTDTA.F3411  TO JDEAGENT_OWN WITH GRANT OPTION;  -- MRP/MPS messages
+-- item master
+GRANT SELECT ON TESTDTA.F4101  TO JDEAGENT_OWN WITH GRANT OPTION;
+-- item branch
+GRANT SELECT ON TESTDTA.F4102  TO JDEAGENT_OWN WITH GRANT OPTION;
+-- item location (on hand)
+GRANT SELECT ON TESTDTA.F41021 TO JDEAGENT_OWN WITH GRANT OPTION;
+-- item ledger (usage)
+GRANT SELECT ON TESTDTA.F4111  TO JDEAGENT_OWN WITH GRANT OPTION;
+-- MRP/MPS messages
+GRANT SELECT ON TESTDTA.F3411  TO JDEAGENT_OWN WITH GRANT OPTION;
 
 -- Verify
 SELECT username, account_status, authentication_type, profile

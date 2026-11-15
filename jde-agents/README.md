@@ -27,8 +27,9 @@ Math lives in `mcp_server/jde_agent/calc.py`: 13 weeks of usage (missing weeks =
 
 **Backup first.** The scripts only add new users and objects; nothing in TESTDTA or POAGENT_* changes. If your change process requires it, take a metadata export of the TESTDTA grants beforehand (command at the top of `00_users_dba.sql`).
 
-1. Precheck the columns. `02_planner_views.sql` stops with a list of missing columns if your release differs. The F3411 columns (`MMMSGA`, `MMDRQJ`, `MMUORG`) are the ones most likely to need a change.
-2. Run as a DBA, from SQL*Plus or SQLcl:
+1. SQL*Plus note: a `;` only ends a statement when it is the last thing on the line. Keep comments on their own line, never after a `;`.
+2. Precheck the columns. `02_planner_views.sql` stops with a list of missing columns if your release differs. The F3411 columns (`MMMSGA`, `MMDRQJ`, `MMUORG`) are the ones most likely to need a change.
+3. Run as a DBA, from SQL*Plus or SQLcl:
    ```
    sqlplus system@JDV920 @sql/00_users_dba.sql '<strong RO password>'
    sqlplus system@JDV920 @sql/01_owner_objects.sql
@@ -36,10 +37,10 @@ Math lives in `mcp_server/jde_agent/calc.py`: 13 weeks of usage (missing weeks =
    -- edit sql/03_seed_scope.sql with the pilot user, AN8 and branch, then:
    sqlplus system@JDV920 @sql/03_seed_scope.sql
    ```
-3. Calibrate the quantity scaling. Compare one item's safety stock in `V_ITEM_PLANNING` with P41026. If they differ by 10^n, run:
+4. Calibrate the quantity scaling. Compare one item's safety stock in `V_ITEM_PLANNING` with P41026. If they differ by 10^n, run:
    `UPDATE JDEAGENT_OWN.AGENT_CONFIG SET cfg_value = '<10^n>' WHERE cfg_key = 'QTY_DIVISOR'; COMMIT;`
    Do the same for `USAGE_DCT` if your issue doc types aren't SO/IM/II.
-4. On vmwindows, set up the server:
+5. On vmwindows, set up the server:
    ```powershell
    cd <repo>\jde-agents\mcp_server
    py -3.12 -m venv .venv
@@ -48,7 +49,7 @@ Math lives in `mcp_server/jde_agent/calc.py`: 13 weeks of usage (missing weeks =
    .\run_server.ps1
    ```
    Keep `MCP_HOST=127.0.0.1` unless Claude Code connects from another machine. In that case, bind to the VM's IP and add an inbound Windows Firewall rule for TCP 8082 limited to that client's IP. Also open 8082 in the OCI security list or NSG for that source only.
-5. Add the server to Claude Code:
+6. Add the server to Claude Code:
    `claude mcp add --transport http jde-planner http://<vmwindows>:8082/mcp`
 
 ## Validation
