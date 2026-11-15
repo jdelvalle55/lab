@@ -7,6 +7,7 @@ Get-Content .env | Where-Object { $_ -match '^\s*[^#].*=' } | ForEach-Object {
     $v = ($v -split '\s+#')[0].Trim()
     [Environment]::SetEnvironmentVariable($k.Trim(), $v, "Process")
 }
-$args = @("-m", "jde_agent.alerts", "--branch", $Branch)
-if ($Send) { $args += "--send" }
-& .\.venv\Scripts\python.exe @args *>> (Join-Path $PSScriptRoot "alerts.log")
+$pyArgs = @("-m", "jde_agent.alerts", "--branch", $Branch)
+if ($Send) { $pyArgs += "--send" }
+# Out-File -Encoding utf8 so the log is readable outside Notepad (PS 5.1 *>> writes UTF-16)
+& .\.venv\Scripts\python.exe @pyArgs 2>&1 | Out-File -FilePath (Join-Path $PSScriptRoot "alerts.log") -Append -Encoding utf8
