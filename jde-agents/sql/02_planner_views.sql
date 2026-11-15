@@ -79,12 +79,16 @@ SELECT TRIM(b.IBMCU)              AS mcu,
                   AND (s.planner_an8 IS NULL OR s.planner_an8 = b.IBANPL));
 
 -- ---------- V_ITEM_USAGE_WEEKLY: issues per item/branch/ISO week ----------
+-- Optional AGENT_CONFIG 'AS_OF_DATE' (YYYY-MM-DD) moves 'today' back for stale lab data;
+-- delete the row to use SYSDATE. Also drives days_late in V_MRP_EXCEPTIONS.
 -- F4111 is the big table: this view filters on raw ILTRDJ so the date index can be used.
 -- If a full-branch query takes more than a few seconds, convert to a nightly MV.
 CREATE OR REPLACE VIEW JDEAGENT_OWN.V_ITEM_USAGE_WEEKLY AS
 WITH c AS (SELECT MAX(CASE cfg_key WHEN 'QTY_DIVISOR' THEN TO_NUMBER(cfg_value) END) d,
                   MAX(CASE cfg_key WHEN 'USAGE_DCT'   THEN cfg_value END)            dct,
-                  MAX(CASE cfg_key WHEN 'USAGE_DAYS'  THEN TO_NUMBER(cfg_value) END) days
+                  MAX(CASE cfg_key WHEN 'USAGE_DAYS'  THEN TO_NUMBER(cfg_value) END) days,
+                  NVL(MAX(CASE cfg_key WHEN 'AS_OF_DATE' THEN TO_DATE(cfg_value, 'YYYY-MM-DD') END),
+                      TRUNC(SYSDATE))                                                as_of
              FROM JDEAGENT_OWN.AGENT_CONFIG)
 SELECT TRIM(l.ILMCU)                                    AS mcu,
        l.ILITM                                          AS itm,
@@ -92,7 +96,8 @@ SELECT TRIM(l.ILMCU)                                    AS mcu,
        SUM(-l.ILTRQT) / MAX(c.d)                        AS usage_qty
   FROM TESTDTA.F4111 l
   CROSS JOIN c
- WHERE l.ILTRDJ >= JDEAGENT_OWN.DATE_TO_JDE(TRUNC(SYSDATE) - c.days)
+ WHERE l.ILTRDJ >  JDEAGENT_OWN.DATE_TO_JDE(c.as_of - c.days)
+   AND l.ILTRDJ <= JDEAGENT_OWN.DATE_TO_JDE(c.as_of)
    AND l.ILTRQT < 0
    AND INSTR(',' || c.dct || ',', ',' || TRIM(l.ILDCT) || ',') > 0
    AND EXISTS (SELECT 1
@@ -108,7 +113,10 @@ SELECT TRIM(l.ILMCU)                                    AS mcu,
 -- MMMSGA = Cleared flag ('Y' or blank); cleared messages are excluded.
 -- MMMSGT/MMMSGA are NCHAR in a Unicode JDE install: compare with N'' literals.
 CREATE OR REPLACE VIEW JDEAGENT_OWN.V_MRP_EXCEPTIONS AS
-WITH q AS (SELECT TO_NUMBER(cfg_value) d FROM JDEAGENT_OWN.AGENT_CONFIG WHERE cfg_key = 'QTY_DIVISOR')
+WITH q AS (SELECT MAX(CASE cfg_key WHEN 'QTY_DIVISOR' THEN TO_NUMBER(cfg_value) END) d,
+                  NVL(MAX(CASE cfg_key WHEN 'AS_OF_DATE' THEN TO_DATE(cfg_value, 'YYYY-MM-DD') END),
+                      TRUNC(SYSDATE)) as_of
+             FROM JDEAGENT_OWN.AGENT_CONFIG)
 SELECT x.MMUKID                                AS message_id,
        TRIM(x.MMMCU)                           AS mcu,
        x.MMITM                                 AS itm,
@@ -120,7 +128,7 @@ SELECT x.MMUKID                                AS message_id,
        x.MMDOCO                                AS order_no,
        TRIM(x.MMDCTO)                          AS order_type,
        JDEAGENT_OWN.JDE_TO_DATE(x.MMDRQJ)      AS requested_date,
-       GREATEST(TRUNC(SYSDATE) - JDEAGENT_OWN.JDE_TO_DATE(x.MMDRQJ), 0) AS days_late,
+       GREATEST(q.as_of - JDEAGENT_OWN.JDE_TO_DATE(x.MMDRQJ), 0) AS days_late,
        x.MMTRQT / q.d                          AS qty
   FROM TESTDTA.F3411 x
   JOIN TESTDTA.F4102 b ON b.IBITM = x.MMITM AND b.IBMCU = x.MMMCU

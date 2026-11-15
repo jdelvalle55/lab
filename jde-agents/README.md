@@ -40,12 +40,13 @@ Math lives in `mcp_server/jde_agent/calc.py`: 13 weeks of usage (missing weeks =
 4. Calibrate the quantity scaling. Compare one item's safety stock in `V_ITEM_PLANNING` with P41026. If they differ by 10^n, run:
    `UPDATE JDEAGENT_OWN.AGENT_CONFIG SET cfg_value = '<10^n>' WHERE cfg_key = 'QTY_DIVISOR'; COMMIT;`
    Do the same for `USAGE_DCT` if your issue doc types aren't SO/IM/II.
+   Lab data is old? Insert `('AS_OF_DATE', 'YYYY-MM-DD', ...)` into `AGENT_CONFIG` so the usage window and days-late are measured from that date. Delete the row for live data.
 5. On vmwindows, set up the server:
    ```powershell
    cd <repo>\jde-agents\mcp_server
-   py -3.12 -m venv .venv
+   py -3 -m venv .venv          # 3.12+; tested with 3.14 on vmwindows
    .\.venv\Scripts\pip install -r requirements.txt
-   copy .env.example .env   # fill in DSN, RO password, JDE_AGENT_USER
+   copy .env.example .env   # fill in DSN, RO password, ORACLE_CLIENT_LIB (thick mode for NNE), JDE_AGENT_USER
    .\run_server.ps1
    ```
    Keep `MCP_HOST=127.0.0.1` unless Claude Code connects from another machine. In that case, bind to the VM's IP and add an inbound Windows Firewall rule for TCP 8082 limited to that client's IP. Also open 8082 in the OCI security list or NSG for that source only.

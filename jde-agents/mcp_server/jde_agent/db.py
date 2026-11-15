@@ -2,6 +2,8 @@
 which the JDEAGENT_OWN views use for row scoping (fail closed when unset)."""
 from __future__ import annotations
 
+import os
+
 import oracledb
 
 from .config import Settings
@@ -9,9 +11,18 @@ from .config import Settings
 _pool: oracledb.ConnectionPool | None = None
 
 
+def _init_client() -> None:
+    """JDEPDB requires Native Network Encryption, which python-oracledb only supports in thick
+    mode. Set ORACLE_CLIENT_LIB to the Instant Client / full client bin directory to enable it."""
+    lib = os.environ.get("ORACLE_CLIENT_LIB")
+    if lib:
+        oracledb.init_oracle_client(lib_dir=lib)
+
+
 def pool(s: Settings) -> oracledb.ConnectionPool:
     global _pool
     if _pool is None:
+        _init_client()
         _pool = oracledb.create_pool(user=s.db_user, password=s.db_password, dsn=s.dsn,
                                      min=1, max=4, increment=1)
     return _pool
