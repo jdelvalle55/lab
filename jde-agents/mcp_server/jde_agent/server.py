@@ -34,6 +34,12 @@ def _jsonable(rows: list[dict]) -> list[dict]:
     return out
 
 
+def _order_rules(it: dict) -> dict:
+    return {"min_qty": float(it.get("min_reorder_qty") or 0),
+            "max_qty": float(it.get("max_reorder_qty") or 0),
+            "multiple": float(it.get("order_multiple") or 0)}
+
+
 def _usage_by_item(branch: str, itm: int | None = None) -> dict[int, list[float]]:
     sql = ("SELECT itm, week_start, usage_qty FROM JDEAGENT_OWN.V_ITEM_USAGE_WEEKLY "
            "WHERE mcu = :mcu" + (" AND itm = :itm" if itm is not None else "") +
@@ -55,7 +61,8 @@ def find_param_gaps(branch: str, planner_an8: int | None = None, limit: int = 25
     """
     limit = max(1, min(limit, 100))
     sql = ("SELECT itm, litm, description, planner_an8, stocking_type, safety_stock, reorder_point, "
-           "reorder_qty, lead_time_days, on_hand, committed_qty, on_po "
+           "reorder_qty, min_reorder_qty, max_reorder_qty, order_multiple, lead_time_days, "
+           "on_hand, committed_qty, on_po "
            "FROM JDEAGENT_OWN.V_ITEM_PLANNING WHERE mcu = :mcu")
     params: dict = {"mcu": branch.strip()}
     if planner_an8 is not None:
@@ -68,7 +75,7 @@ def find_param_gaps(branch: str, planner_an8: int | None = None, limit: int = 25
     for it in items:
         rec = calc.recommend(usage.get(it["itm"], []), float(it["lead_time_days"] or 0),
                              weeks=S.usage_weeks, z=S.service_level_z,
-                             review_period_days=S.review_period_days)
+                             review_period_days=S.review_period_days, **_order_rules(it))
         gaps = calc.find_gaps(it, rec)
         if gaps:
             findings.append({"item": it["litm"], "description": it["description"],
@@ -102,14 +109,16 @@ def recommend_reorder(item: str, branch: str) -> dict:
     it = rows[0]
     weekly = _usage_by_item(branch, it["itm"]).get(it["itm"], [])
     rec = calc.recommend(weekly, float(it["lead_time_days"] or 0), weeks=S.usage_weeks,
-                         z=S.service_level_z, review_period_days=S.review_period_days)
+                         z=S.service_level_z, review_period_days=S.review_period_days,
+                         **_order_rules(it))
     available = float(it["on_hand"] or 0) - float(it["committed_qty"] or 0)
     position = available + float(it["on_po"] or 0)
     return {
         "item": it["litm"], "description": it["description"], "branch": branch,
         "current": _jsonable([{k: it[k] for k in ("safety_stock", "reorder_point", "reorder_qty",
-                                                  "lead_time_days", "on_hand", "committed_qty",
-                                                  "on_po")}])[0],
+                                                  "min_reorder_qty", "max_reorder_qty",
+                                                  "order_multiple", "lead_time_days", "on_hand",
+                                                  "committed_qty", "on_po")}])[0],
         "suggested": rec.as_dict(),
         "inventory_position": round(position, 2),
         "below_suggested_rop": bool(rec.reorder_point is not None and position < rec.reorder_point),

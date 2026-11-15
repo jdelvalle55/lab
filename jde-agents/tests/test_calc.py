@@ -44,3 +44,16 @@ def test_excessive_rop():
     rec = calc.recommend([70.0] * 13, 14, **KW)
     assert "ROP_EXCESSIVE" in calc.find_gaps(
         {"safety_stock": 10, "reorder_point": 1000, "lead_time_days": 14}, rec)
+
+
+def test_order_rules_min_multiple_max():
+    assert calc.apply_order_rules(120, min_qty=500, max_qty=5000, multiple=100) == 500
+    assert calc.apply_order_rules(1234, min_qty=500, max_qty=5000, multiple=100) == 1300
+    assert calc.apply_order_rules(9000, min_qty=500, max_qty=5000, multiple=100) == 5000
+    assert calc.apply_order_rules(9000, max_qty=4950, multiple=100) == 4900
+    assert calc.apply_order_rules(37) == 37
+
+
+def test_recommend_applies_order_rules():
+    rec = calc.recommend([70.0] * 13, 14, min_qty=500, max_qty=5000, multiple=100, **KW)
+    assert rec.reorder_qty == 500          # 10/day * 30 = 300, raised to the 500 minimum

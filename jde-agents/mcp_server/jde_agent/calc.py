@@ -5,7 +5,8 @@ Formulas (all quantities in stocking UOM, time in days):
   sigma_daily    = stdev(weekly usage, missing weeks = 0) / sqrt(7)
   safety_stock   = z * sigma_daily * sqrt(lead_time)
   reorder_point  = avg_daily * lead_time + safety_stock
-  reorder_qty    = avg_daily * review_period_days
+  reorder_qty    = avg_daily * review_period_days, then item-branch order rules:
+                   raise to min (IBRQMN), round up to multiple (IBMULT), cap at max (IBRQMX)
 """
 from __future__ import annotations
 
@@ -34,8 +35,21 @@ def weekly_series(weekly_usage: list[float], weeks: int) -> list[float]:
     return vals + [0.0] * (weeks - len(vals))
 
 
+def apply_order_rules(qty: float, min_qty: float = 0, max_qty: float = 0,
+                      multiple: float = 0) -> float:
+    """Apply JDE item-branch order rules the way a planner would expect: at least the minimum,
+    a whole number of multiples, and never above the maximum (rounded down to a multiple)."""
+    q = max(qty, min_qty or 0)
+    if multiple and multiple > 0:
+        q = math.ceil(q / multiple) * multiple
+    if max_qty and max_qty > 0 and q > max_qty:
+        q = math.floor(max_qty / multiple) * multiple if multiple and multiple > 0 else max_qty
+    return float(q)
+
+
 def recommend(weekly_usage: list[float], lead_time_days: float, *, weeks: int,
-              z: float, review_period_days: int) -> Recommendation:
+              z: float, review_period_days: int, min_qty: float = 0, max_qty: float = 0,
+              multiple: float = 0) -> Recommendation:
     series = weekly_series(weekly_usage, weeks)
     avg_daily = sum(series) / (weeks * 7)
     wk_sd = statistics.pstdev(series) if weeks > 1 else 0.0
@@ -48,7 +62,7 @@ def recommend(weekly_usage: list[float], lead_time_days: float, *, weeks: int,
     sigma_daily = wk_sd / math.sqrt(7)
     ss = z * sigma_daily * math.sqrt(lead_time_days)
     rop = avg_daily * lead_time_days + ss
-    roq = avg_daily * review_period_days
+    roq = apply_order_rules(math.ceil(avg_daily * review_period_days), min_qty, max_qty, multiple)
     return Recommendation(avg_daily, wk_sd, float(lead_time_days),
                           math.ceil(ss), math.ceil(rop), math.ceil(roq))
 
