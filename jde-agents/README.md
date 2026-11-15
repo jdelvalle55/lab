@@ -28,7 +28,7 @@ Math lives in `mcp_server/jde_agent/calc.py`: 13 weeks of usage (missing weeks =
 **Backup first.** The scripts only add new users and objects; nothing in TESTDTA or POAGENT_* changes. If your change process requires it, take a metadata export of the TESTDTA grants beforehand (command at the top of `00_users_dba.sql`).
 
 1. SQL*Plus note: a `;` only ends a statement when it is the last thing on the line. Keep comments on their own line, never after a `;`.
-2. Precheck the columns. `02_planner_views.sql` stops with a list of missing columns if your release differs. The F3411 columns (`MMMSGA`, `MMDRQJ`, `MMUORG`) are the ones most likely to need a change.
+2. Precheck the columns. `02_planner_views.sql` stops with a list of missing columns if your release differs. In JDV920, F3411 quantity is `MMTRQT` and `MMMSGA` is the cleared flag (`Y`/blank).
 3. Run as a DBA, from SQL*Plus or SQLcl:
    ```
    sqlplus system@JDV920 @sql/00_users_dba.sql '<strong RO password>'
@@ -63,5 +63,5 @@ Math lives in `mcp_server/jde_agent/calc.py`: 13 weeks of usage (missing weeks =
 
 - **Row scoping depends on CLIENT_IDENTIFIER.** The views fail closed when it's unset, but a bad row in `AGENT_USER_SCOPE` exposes that branch. Test with a second user before the pilot. If the PO agent scopes users a different way, align this to match (open question in the doc).
 - **F4111 scans can load the DV database.** Consider a Resource Manager consumer group for JDEAGENT_RO.
-- **MRP message labels are unverified.** The labels in `server.py` are the standard ones; check them against your UDC.
+- **MRP message labels:** only B/C/D/E/G/H/O are labelled; other codes (A, N, P, T...) show as "See UDC" until confirmed.
 - **Rollback:** stop the server, remove it from Claude Code, and run `sql/99_rollback_dba.sql`. This takes under a minute and touches only JDEAGENT_* objects.

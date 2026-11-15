@@ -17,12 +17,11 @@ from .config import Settings
 S = Settings()
 mcp = FastMCP("jde-planner-agent", host=S.host, port=S.port)
 
-# F3411 message types. VERIFY against your MRP message type UDC before relying on labels.
+# F3411 message types: only the codes we're confident of are labelled. Anything else is
+# reported as-is with "See UDC"; confirm the full list in your MRP message type UDC.
 MESSAGE_TYPES = {
     "B": "Order and expedite", "C": "Cancel", "D": "Defer", "E": "Expedite",
-    "G": "Increase order quantity", "H": "Decrease order quantity",
-    "L": "Increase and expedite", "M": "Decrease and expedite",
-    "N": "Increase and defer", "O": "Order", "S": "Decrease and defer",
+    "G": "Increase order quantity", "H": "Decrease order quantity", "O": "Order",
 }
 
 
@@ -142,11 +141,11 @@ def list_mrp_exceptions(branch: str, message_type: str | None = None,
     summary: dict[str, dict] = {}
     for r in rows:
         mt = r["message_type"] or "?"
-        s = summary.setdefault(mt, {"label": MESSAGE_TYPES.get(mt, "Unmapped"), "count": 0,
+        s = summary.setdefault(mt, {"label": MESSAGE_TYPES.get(mt, "See UDC"), "count": 0,
                                     "max_days_late": 0})
         s["count"] += 1
         s["max_days_late"] = max(s["max_days_late"], r["days_late"] or 0)
-        r["message_label"] = MESSAGE_TYPES.get(mt, "Unmapped")
+        r["message_label"] = MESSAGE_TYPES.get(mt, "See UDC")
     return {"branch": branch, "total": len(rows), "by_type": summary, "top": rows[:limit]}
 
 

@@ -19,8 +19,8 @@ DECLARE
     'F4102.IBLTLV','F4102.IBABCS','F4102.IBABCM','F4102.IBABCI','F4102.IBCYCL',
     'F41021.LIITM','F41021.LIMCU','F41021.LIPQOH','F41021.LIHCOM','F41021.LIPCOM','F41021.LIPREQ',
     'F4111.ILITM','F4111.ILMCU','F4111.ILDCT','F4111.ILTRQT','F4111.ILTRDJ',
-    'F3411.MMUKID','F3411.MMITM','F3411.MMMCU','F3411.MMMSGT','F3411.MMMSGA',   -- VERIFY
-    'F3411.MMDOCO','F3411.MMDCTO','F3411.MMDRQJ','F3411.MMUORG');               -- VERIFY
+    'F3411.MMUKID','F3411.MMITM','F3411.MMMCU','F3411.MMMSGT','F3411.MMMSGA',
+    'F3411.MMDOCO','F3411.MMDCTO','F3411.MMDRQJ','F3411.MMTRQT');
   l_cnt NUMBER; l_missing NUMBER := 0;
 BEGIN
   FOR i IN 1 .. l_req.COUNT LOOP
@@ -102,7 +102,8 @@ SELECT TRIM(l.ILMCU)                                    AS mcu,
  GROUP BY TRIM(l.ILMCU), l.ILITM, TRUNC(JDEAGENT_OWN.JDE_TO_DATE(l.ILTRDJ), 'IW');
 
 -- ---------- V_MRP_EXCEPTIONS: open MRP/MPS messages ----------
--- MMMSGA (message action) 'C' = cleared is excluded. VERIFY the action codes in your UDC.
+-- MMMSGA = Cleared flag ('Y' or blank); cleared messages are excluded.
+-- MMMSGT/MMMSGA are NCHAR in a Unicode JDE install: compare with N'' literals.
 CREATE OR REPLACE VIEW JDEAGENT_OWN.V_MRP_EXCEPTIONS AS
 WITH q AS (SELECT TO_NUMBER(cfg_value) d FROM JDEAGENT_OWN.AGENT_CONFIG WHERE cfg_key = 'QTY_DIVISOR')
 SELECT x.MMUKID                                AS message_id,
@@ -117,12 +118,12 @@ SELECT x.MMUKID                                AS message_id,
        TRIM(x.MMDCTO)                          AS order_type,
        JDEAGENT_OWN.JDE_TO_DATE(x.MMDRQJ)      AS requested_date,
        GREATEST(TRUNC(SYSDATE) - JDEAGENT_OWN.JDE_TO_DATE(x.MMDRQJ), 0) AS days_late,
-       x.MMUORG / q.d                          AS qty
+       x.MMTRQT / q.d                          AS qty
   FROM TESTDTA.F3411 x
   JOIN TESTDTA.F4102 b ON b.IBITM = x.MMITM AND b.IBMCU = x.MMMCU
   JOIN TESTDTA.F4101 m ON m.IMITM = x.MMITM
   CROSS JOIN q
- WHERE NVL(TRIM(x.MMMSGA), ' ') <> 'C'
+ WHERE NVL(TRIM(x.MMMSGA), N' ') <> N'Y'
    AND EXISTS (SELECT 1 FROM JDEAGENT_OWN.AGENT_USER_SCOPE s
                 WHERE s.jde_user = SYS_CONTEXT('USERENV', 'CLIENT_IDENTIFIER')
                   AND s.agent_role IN ('PLANNER', 'ADMIN')
