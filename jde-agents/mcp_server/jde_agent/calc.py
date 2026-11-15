@@ -60,7 +60,7 @@ def recommend(weekly_usage: list[float], lead_time_days: float, *, weeks: int,
     avg_daily = sum(series) / (weeks * 7)
     wk_sd = statistics.pstdev(series) if weeks > 1 else 0.0
     if not lead_time_days or lead_time_days <= 0:
-        return Recommendation(avg_daily, wk_sd, 0.0, None, None, None,
+        return Recommendation(avg_daily, wk_sd, 0.0, None, None, None, note=
                               "No lead time on the item branch (IBLTLV = 0); cannot size SS/ROP.")
     if avg_daily == 0:
         return Recommendation(0.0, 0.0, lead_time_days, 0.0, 0.0, 0.0, assumed,
