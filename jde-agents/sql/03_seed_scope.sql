@@ -5,9 +5,9 @@
 SET ECHO ON
 WHENEVER SQLERROR EXIT FAILURE ROLLBACK
 
--- Example only: replace user, AN8 and branch with real pilot values.
+-- Lab pilot: JDE sign-on (AN8 1 in SY920.F0092), branch 30, all planners.
 INSERT INTO JDEAGENT_OWN.AGENT_USER_SCOPE (jde_user, an8, mcu, planner_an8, agent_role)
-VALUES ('POUSER', 61049, '30', NULL, 'PLANNER');
+VALUES ('JDE', 1, '30', NULL, 'PLANNER');
 
 COMMIT;
 SELECT * FROM JDEAGENT_OWN.AGENT_USER_SCOPE ORDER BY jde_user, mcu;
