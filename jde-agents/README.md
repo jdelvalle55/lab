@@ -82,12 +82,18 @@ Math lives in `mcp_server/jde_agent/calc.py`: 13 weeks of usage (missing weeks =
 | Lead time drift | Actual median is at least `LT_DRIFT_PCT` off IBLTLV |
 | No planned lead time | Receipts exist but IBLTLV is 0 |
 
-Without `--send`, or with `SMTP_HOST`/`ALERT_TO` empty, it writes the message to `mcp_server/outbox/` instead of emailing. Nothing is written to the database, and no LLM is involved.
+Every run that finds changes writes a copy to `mcp_server/outbox/`. With `--send`, it also posts an Adaptive Card to Teams when `TEAMS_WEBHOOK_URL` is set, or else emails when `SMTP_HOST` and `ALERT_TO` are set. Nothing is written to the database, and no LLM is involved.
 
 On vmwindows:
+### Teams (Workflows webhook)
+1. In the Teams channel, open ... → **Workflows**, then pick **"Post to a channel when a webhook request is received"**. Name it, choose the team and channel, and copy the URL it gives you.
+2. Put it in `mcp_server\.env` as `TEAMS_WEBHOOK_URL=...`. Treat it as a secret: anyone with the URL can post to the channel.
+3. vmwindows needs outbound HTTPS (443) to the URL's host (`*.logic.azure.com` or `*.environment.api.powerplatform.com`).
+4. Test once: `.\.venv\Scripts\python.exe -m jde_agent.alerts --branch 30 --reset --send`. `--reset` re-sends every open alert.
+
 ```powershell
 .\run_alerts.ps1 -Branch 30                 # one dry run; log in alerts.log
 .\register_alerts_task.ps1 -Branch 30       # hourly 07:00-19:00 Mon-Fri, dry run
-.\register_alerts_task.ps1 -Branch 30 -Send # same, emailing (after SMTP_* and ALERT_TO are set)
+.\register_alerts_task.ps1 -Branch 30 -Send # same, posting to Teams (or email) - admin PowerShell
 Unregister-ScheduledTask -TaskName "JDE Planner Alerts" -Confirm:$false   # remove
 ```

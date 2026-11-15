@@ -33,3 +33,35 @@ def test_deliver_dry_run_writes_outbox(tmp_path, monkeypatch):
     monkeypatch.delenv("SMTP_HOST", raising=False)
     result = alerts.deliver("JDE Planner alerts: 1 new, branch 30", "body", send=True)
     assert result.startswith("dry run") and len(list(tmp_path.iterdir())) == 1
+
+
+def test_card_shape_and_cap(monkeypatch):
+    monkeypatch.setattr(alerts, "CARD_MAX_ROWS", 2)
+    rows = [{"id": str(i), "kind": "No planned lead time", "text": f"item {i}"} for i in range(5)]
+    card = alerts.build_card("30", rows, [], ["x"], 5)
+    att = card["attachments"][0]
+    assert card["type"] == "message"
+    assert att["contentType"] == "application/vnd.microsoft.card.adaptive"
+    texts = [b.get("text", "") for b in att["content"]["body"]]
+    assert sum(t.startswith("- item") for t in texts) == 2
+    assert any(t.startswith("+3 more") for t in texts)
+    import json
+    assert len(json.dumps(card)) < 28_000
+
+
+def test_deliver_posts_to_teams_when_configured(tmp_path, monkeypatch):
+    monkeypatch.setattr(alerts, "OUTBOX_DIR", tmp_path)
+    monkeypatch.setenv("TEAMS_WEBHOOK_URL", "https://example.invalid/hook")
+    sent = {}
+    monkeypatch.setattr(alerts, "post_teams", lambda url, card: sent.setdefault("url", url) and "posted to Teams (HTTP 202)")
+    out = alerts.deliver("JDE Planner alerts: 1 new, branch 30", "body", True,
+                         alerts.build_card("30", [], [], [], 0))
+    assert sent["url"] == "https://example.invalid/hook" and out.startswith("posted to Teams")
+    assert len(list(tmp_path.iterdir())) == 1   # outbox copy kept
+
+
+def test_no_send_never_posts(tmp_path, monkeypatch):
+    monkeypatch.setattr(alerts, "OUTBOX_DIR", tmp_path)
+    monkeypatch.setenv("TEAMS_WEBHOOK_URL", "https://example.invalid/hook")
+    monkeypatch.setattr(alerts, "post_teams", lambda *a: (_ for _ in ()).throw(AssertionError("posted")))
+    assert alerts.deliver("s 30", "b", False, {}).startswith("dry run")

@@ -2,7 +2,8 @@
 and sends only what is new or changed. Meant for Windows Task Scheduler (run_alerts.ps1).
 
   python -m jde_agent.alerts --branch 30            # dry run: writes to the outbox folder
-  python -m jde_agent.alerts --branch 30 --send     # email via SMTP (needs SMTP_* settings)
+  python -m jde_agent.alerts --branch 30 --send     # Teams if TEAMS_WEBHOOK_URL is set,
+                                                    # else email via SMTP_*, else outbox
 
 No LLM here: alert content is deterministic. State lives in a local JSON file per branch,
 so nothing is written to the database.
@@ -14,6 +15,7 @@ import json
 import os
 import smtplib
 import sys
+import urllib.request
 from datetime import datetime
 from email.message import EmailMessage
 from pathlib import Path
@@ -99,13 +101,77 @@ def render(branch: str, new: list[dict], changed: list[dict], cleared: list[str]
     return "\n".join(lines)
 
 
-def deliver(subject: str, body: str, send: bool) -> str:
+CARD_MAX_ROWS = int(os.environ.get("TEAMS_MAX_ROWS", "40"))
+
+
+def build_card(branch: str, new: list[dict], changed: list[dict], cleared: list[str],
+               total: int) -> dict:
+    """Adaptive Card for a Teams Workflows 'post to channel when a webhook request is received'
+    flow. Kept well under the 28 KB card limit by capping rows."""
+    body: list[dict] = [
+        {"type": "TextBlock", "size": "Medium", "weight": "Bolder", "wrap": True,
+         "text": f"JDE Planner alerts · branch {branch}"},
+        {"type": "FactSet", "facts": [
+            {"title": "New", "value": str(len(new))},
+            {"title": "Changed", "value": str(len(changed))},
+            {"title": "Cleared", "value": str(len(cleared))},
+            {"title": "Open", "value": str(total)}]},
+    ]
+    shown = 0
+    for title, rows in (("New", new), ("Changed", changed)):
+        for kind in sorted({r["kind"] for r in rows}):
+            body.append({"type": "TextBlock", "weight": "Bolder", "spacing": "Medium",
+                         "wrap": True, "text": f"{title}: {kind}"})
+            for r in [r for r in rows if r["kind"] == kind]:
+                if shown >= CARD_MAX_ROWS:
+                    break
+                body.append({"type": "TextBlock", "wrap": True, "spacing": "None",
+                             "text": f"- {r['text']}"})
+                shown += 1
+    hidden = len(new) + len(changed) - shown
+    if hidden > 0:
+        body.append({"type": "TextBlock", "wrap": True, "isSubtle": True,
+                     "text": f"+{hidden} more; see the outbox file on the agent host."})
+    if cleared:
+        body.append({"type": "TextBlock", "wrap": True, "isSubtle": True, "spacing": "Medium",
+                     "text": f"Cleared: {', '.join(cleared[:20])}"
+                             + (" …" if len(cleared) > 20 else "")})
+    body.append({"type": "TextBlock", "wrap": True, "isSubtle": True, "size": "Small",
+                 "text": "Read-only report from the JDE Planner agent. Nothing was changed in "
+                         "JDE. 'assumed' = default lead time."})
+    return {"type": "message", "attachments": [{
+        "contentType": "application/vnd.microsoft.card.adaptive", "contentUrl": None,
+        "content": {"$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+                    "type": "AdaptiveCard", "version": "1.4", "msteams": {"width": "Full"},
+                    "body": body}}]}
+
+
+def post_teams(url: str, card: dict) -> str:
+    req = urllib.request.Request(url, data=json.dumps(card).encode("utf-8"), method="POST",
+                                 headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        if resp.status not in (200, 202):
+            raise RuntimeError(f"Teams webhook returned HTTP {resp.status}")
+        return f"posted to Teams (HTTP {resp.status})"
+
+
+def write_outbox(subject: str, body: str) -> str:
+    OUTBOX_DIR.mkdir(parents=True, exist_ok=True)
+    path = OUTBOX_DIR / f"{datetime.now():%Y%m%d_%H%M%S}_{subject.split()[-1]}.txt"
+    path.write_text(f"Subject: {subject}\n\n{body}\n", encoding="utf-8")
+    return str(path)
+
+
+def deliver(subject: str, body: str, send: bool, card: dict | None = None) -> str:
+    """Always keeps a copy in the outbox; with send=True also posts to Teams (if
+    TEAMS_WEBHOOK_URL is set) or emails (if SMTP_HOST and ALERT_TO are set)."""
+    path = write_outbox(subject, body)
+    teams = os.environ.get("TEAMS_WEBHOOK_URL", "").strip()
+    if send and teams and card is not None:
+        return post_teams(teams, card) + f"; copy in {path}"
     host = os.environ.get("SMTP_HOST")
     to = [a.strip() for a in os.environ.get("ALERT_TO", "").split(",") if a.strip()]
     if not send or not host or not to:
-        OUTBOX_DIR.mkdir(parents=True, exist_ok=True)
-        path = OUTBOX_DIR / f"{datetime.now():%Y%m%d_%H%M%S}_{subject.split()[-1]}.txt"
-        path.write_text(f"Subject: {subject}\n\n{body}\n", encoding="utf-8")
         return f"dry run: wrote {path}"
     msg = EmailMessage()
     msg["Subject"], msg["From"], msg["To"] = subject, os.environ.get("SMTP_FROM", "jde-agent@localhost"), ", ".join(to)
@@ -135,7 +201,7 @@ def main(argv: list[str] | None = None) -> int:
     if new or changed or cleared:
         body = render(args.branch, new, changed, cleared, len(cur))
         result = deliver(f"JDE Planner alerts: {len(new)} new, branch {args.branch}", body,
-                         args.send)
+                         args.send, build_card(args.branch, new, changed, cleared, len(cur)))
     else:
         result = "no changes, nothing sent"
     # Save state only after a successful delivery, so a failed send is retried next run.
