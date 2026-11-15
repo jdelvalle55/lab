@@ -76,15 +76,9 @@ def _size(it: dict, weekly: list[float], actual: dict | None):
     return rec, lt_info, drift
 
 
-@mcp.tool()
-def find_param_gaps(branch: str, planner_an8: int | None = None, limit: int = 25) -> dict:
-    """Find stocked items in a branch/plant whose safety stock, reorder point or lead time
-    is missing or out of line with the last 13 weeks of usage. Ranked by average daily usage.
-    Read-only: does not change JDE. Does not cover items outside the caller's scope.
-
-    branch: JDE branch/plant (MCU), e.g. "30". planner_an8: optional planner filter.
-    """
-    limit = max(1, min(limit, 100))
+def assess_branch(branch: str, planner_an8: int | None = None) -> tuple[int, list[dict]]:
+    """Size every planned item in the branch. Shared by find_param_gaps and the alert job.
+    Returns (items_checked, per-item assessments)."""
     sql = ("SELECT itm, litm, description, planner_an8, stocking_type, safety_stock, reorder_point, "
            "reorder_qty, min_reorder_qty, max_reorder_qty, order_multiple, lead_time_days, "
            "on_hand, committed_qty, on_po "
@@ -97,24 +91,43 @@ def find_param_gaps(branch: str, planner_an8: int | None = None, limit: int = 25
              if (i["stocking_type"] or "").strip() in S.planned_stocking_types]
     usage = _usage_by_item(branch)
     actuals = _actual_lead_times(branch)
-    findings = []
+    out = []
     for it in items:
         rec, lt_info, drift = _size(it, usage.get(it["itm"], []), actuals.get(it["itm"]))
-        gaps = calc.find_gaps(it, rec, drift)
-        if gaps:
-            findings.append({"item": it["litm"], "description": it["description"],
-                             "planner_an8": it["planner_an8"],
-                             "current": {k: it[k] for k in ("safety_stock", "reorder_point",
-                                                            "reorder_qty", "lead_time_days")},
-                             "suggested": rec.as_dict(), "lead_time": lt_info,
-                             "gaps": [{"code": g, "text": calc.GAP_TEXT[g]} for g in gaps]})
+        position = (float(it["on_hand"] or 0) - float(it["committed_qty"] or 0)
+                    + float(it["on_po"] or 0))
+        out.append({"item": it["litm"], "description": it["description"],
+                    "planner_an8": it["planner_an8"],
+                    "current": {k: it[k] for k in ("safety_stock", "reorder_point",
+                                                   "reorder_qty", "lead_time_days")},
+                    "suggested": rec.as_dict(), "lead_time": lt_info,
+                    "inventory_position": round(position, 2),
+                    "below_suggested_rop": bool(rec.reorder_point is not None
+                                                and rec.avg_daily_usage > 0
+                                                and position < rec.reorder_point),
+                    "gaps": [{"code": g, "text": calc.GAP_TEXT[g]}
+                             for g in calc.find_gaps(it, rec, drift)]})
+    return len(items), out
+
+
+@mcp.tool()
+def find_param_gaps(branch: str, planner_an8: int | None = None, limit: int = 25) -> dict:
+    """Find stocked items in a branch/plant whose safety stock, reorder point or lead time
+    is missing or out of line with the last 13 weeks of usage. Ranked by average daily usage.
+    Read-only: does not change JDE. Does not cover items outside the caller's scope.
+
+    branch: JDE branch/plant (MCU), e.g. "30". planner_an8: optional planner filter.
+    """
+    limit = max(1, min(limit, 100))
+    items_checked, assessed = assess_branch(branch, planner_an8)
+    findings = [a for a in assessed if a["gaps"]]
     findings.sort(key=lambda f: f["suggested"]["avg_daily_usage"], reverse=True)
     # Suggested values on NO_LEAD_TIME items use the assumed default (see lead_time_assumed).
     counts: dict[str, int] = defaultdict(int)
     for f in findings:
         for g in f["gaps"]:
             counts[g["code"]] += 1
-    return {"branch": branch, "items_checked": len(items), "items_with_gaps": len(findings),
+    return {"branch": branch, "items_checked": items_checked, "items_with_gaps": len(findings),
             "gap_counts": dict(counts), "top": _jsonable(findings[:limit])}
 
 

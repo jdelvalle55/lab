@@ -70,3 +70,24 @@ Math lives in `mcp_server/jde_agent/calc.py`: 13 weeks of usage (missing weeks =
 - **F4111 scans can load the DV database.** Consider a Resource Manager consumer group for JDEAGENT_RO.
 - **MRP message labels:** only B/C/D/E/G/H/O are labelled; other codes (A, N, P, T...) show as "See UDC" until confirmed.
 - **Rollback:** stop the server, remove it from Claude Code, and run `sql/99_rollback_dba.sql`. This takes under a minute and touches only JDEAGENT_* objects.
+
+## Alerts (dry run by default)
+
+`python -m jde_agent.alerts --branch 30` runs the same checks as the tools. It compares them with the last run (stored in `mcp_server/state/alerts_<branch>.json`) and reports only new, changed, and cleared items:
+
+| Alert | Source |
+| --- | --- |
+| Below reorder point | Inventory position below the suggested ROP; the lead time source (actual, item_branch, or assumed) is shown |
+| MRP message | Open F3411 messages whose type is in `ALERT_MSG_TYPES` (default B,C,D,E) |
+| Lead time drift | Actual median is at least `LT_DRIFT_PCT` off IBLTLV |
+| No planned lead time | Receipts exist but IBLTLV is 0 |
+
+Without `--send`, or with `SMTP_HOST`/`ALERT_TO` empty, it writes the message to `mcp_server/outbox/` instead of emailing. Nothing is written to the database, and no LLM is involved.
+
+On vmwindows:
+```powershell
+.\run_alerts.ps1 -Branch 30                 # one dry run; log in alerts.log
+.\register_alerts_task.ps1 -Branch 30       # hourly 07:00-19:00 Mon-Fri, dry run
+.\register_alerts_task.ps1 -Branch 30 -Send # same, emailing (after SMTP_* and ALERT_TO are set)
+Unregister-ScheduledTask -TaskName "JDE Planner Alerts" -Confirm:$false   # remove
+```
